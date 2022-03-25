@@ -19,8 +19,22 @@ local function replace(playerColumn, vehicleColumn)
 	end
 end
 
+local function replaceTable(tableName, value)
+	for k, v in pairs(Query) do 
+		local foundName = v:find(tableName)
+		if foundName then 
+			Query[k] = v:gsub(tableName, value)
+		end 
+	end 
+end 
+
 if shared.framework == 'esx' then
 	replace('users', 'owned_vehicles')
+end
+
+if shared.framework == 'nw' then
+	replaceTable('charid', 'citizenId')
+	replaceTable('identifier', 'citizenId')
 end
 
 function MySQL:loadPlayer(identifier)
