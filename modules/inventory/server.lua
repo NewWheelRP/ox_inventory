@@ -24,7 +24,7 @@ local function openStash(data, player)
 		local inventory = Inventories[owner and ('%s:%s'):format(stash.name, owner) or stash.name]
 
 		if not inventory then
-			inventory = Inventory.Create(stash.name, stash.label or stash.name, inv, stash.slots, 0, stash.weight, owner or false, false, stash.groups)
+			inventory = Inventory.Create(stash.name, stash.label or stash.name, 'stash', stash.slots, 0, stash.weight, owner, false, stash.groups)
 		end
 
 		return inventory
@@ -64,15 +64,21 @@ function Inventory.Set(inv, k, v)
 	inv = Inventory(inv)
 	if inv then
 		if type(v) == 'number' then math.floor(v + 0.5) end
+
 		if k == 'open' and v == false then
 			if inv.type ~= 'player' then
 				if inv.type == 'otherplayer' then
 					inv.type = 'player'
 				elseif inv.type == 'drop' and not next(inv.items) then
 					return Inventory.Remove(inv.id, inv.type)
-				else inv.time = os.time() end
+				else
+					inv.time = os.time()
+				end
 			end
+		elseif k == 'maxWeight' and v < 1000 then
+			v *= 1000
 		end
+
 		inv[k] = v
 	end
 end
@@ -564,6 +570,7 @@ function Inventory.AddItem(inv, item, count, metadata, slot, cb)
 			if slot then
 				Inventory.SetSlot(inv, item, count, metadata, slot)
 				inv.weight = inv.weight + (item.weight + (metadata?.weight or 0)) * count
+				success = true
 
 				if inv.type == 'player' then
 					if shared.framework == 'esx' then Inventory.SyncInventory(inv) end
@@ -721,7 +728,7 @@ function Inventory.CanCarryItem(inv, item, count, metadata)
 			if count == nil then count = 1 end
 			local newWeight = inv.weight + (item.weight * count)
 
-			if newWeight >= inv.maxWeight then
+			if newWeight > inv.maxWeight then
 				TriggerClientEvent('ox_inventory:notify', inv.id, {type = 'error', text = shared.locale('cannot_carry')})
 				return false
 			end
@@ -1300,7 +1307,7 @@ RegisterServerEvent('ox_inventory:updateWeapon', function(action, value, slot)
 				end
 				syncInventory = true
 			elseif action == 'ammo' then
-				if weapon.name == 'WEAPON_FIREEXTINGUISHER' or weapon.name == 'WEAPON_PETROLCAN' then
+				if weapon.hash == `WEAPON_FIREEXTINGUISHER` or weapon.hash == `WEAPON_PETROLCAN` then
 					weapon.metadata.durability = math.floor(value)
 					weapon.metadata.ammo = weapon.metadata.durability
 				elseif value < weapon.metadata.ammo then

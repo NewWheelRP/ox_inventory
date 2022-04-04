@@ -73,6 +73,10 @@ local function openInventory(inv, data)
 		end
 	end
 
+	if inv == 'dumpster' and cache.vehicle then
+		return Utils.Notify({type = 'error', text = shared.locale('inventory_right_access'), duration = 2500})
+	end
+
 	if canOpenInventory() then
 		local left, right
 
@@ -99,9 +103,10 @@ local function openInventory(inv, data)
 		end
 
 		if left then
-			if inv ~= 'trunk' and not IsPedInAnyVehicle(cache.ped, false) then
+			if inv ~= 'trunk' and not cache.vehicle then
 				Utils.PlayAnim(1000, 'pickup_object', 'putdown_low', 5.0, 1.5, -1, 48, 0.0, 0, 0, 0)
 			end
+
 			plyState.invOpen = true
 			SetInterval(client.interval, 100)
 			SetNuiFocus(true, true)
@@ -175,7 +180,7 @@ local function useItem(data, cb)
 			if p then Citizen.Await(p) end
 
 			if not p or not p.value then
-				if result.name:sub(0, 3) ~= 'at_' and result.consume and result.consume ~= 0 then
+				if result.consume and result.consume ~= 0 and not result.component then
 					TriggerServerEvent('ox_inventory:removeItem', result.name, result.consume, result.metadata, result.slot, true)
 				end
 
@@ -213,7 +218,11 @@ local function useSlot(slot)
 		if not item then return end
 		local data = item and Items[item.name]
 		if not data or not data.usable then return end
-		if data.name:sub(0, 3) == 'at_' and not currentWeapon then Utils.Notify({type = 'error', text = shared.locale('weapon_hand_required')}) return end
+
+		if data.component and not currentWeapon then
+			return Utils.Notify({type = 'error', text = shared.locale('weapon_hand_required')})
+		end
+
 		data.slot = slot
 
 		if item.metadata.container then
@@ -221,13 +230,8 @@ local function useSlot(slot)
 		elseif data.client then
 			if invOpen and data.close then TriggerEvent('ox_inventory:closeInventory') end
 
-			if data.client.export then
-				if type(data.client.export) ~= 'function' then
-					local resource, fn = string.strsplit('.', data.client.export)
-					data.client.export = exports[resource][fn]
-				end
-
-				return data.client.export(0, data, {name = item.name, slot = item.slot, metadata = item.metadata})
+			if data.export then
+				return data.export(data, {name = item.name, slot = item.slot, metadata = item.metadata})
 			elseif data.client.event then -- deprecated, to be removed
 				return error(('unable to trigger event for %s, data.client.event has been removed. utilise exports instead.'):format(item.name))
 			end
@@ -235,7 +239,7 @@ local function useSlot(slot)
 
 		if data.effect then
 			data:effect({name = item.name, slot = item.slot, metadata = item.metadata})
-		elseif item.name:sub(0, 7) == 'WEAPON_' then
+		elseif data.weapon then
 			if client.weaponWheel then return end
 			useItem(data, function(result)
 				if result then
@@ -250,7 +254,7 @@ local function useSlot(slot)
 					if currentWeapon then currentWeapon = Utils.Disarm(currentWeapon) end
 					local sleep = (client.hasGroup(shared.police) and (GetWeapontypeGroup(data.hash) == 416676503 or GetWeapontypeGroup(data.hash) == 690389602)) and 400 or 1200
 					local coords = GetEntityCoords(playerPed, true)
-					if item.name == 'WEAPON_SWITCHBLADE' then
+					if item.hash == `WEAPON_SWITCHBLADE` then
 						Utils.PlayAnimAdvanced(sleep*2, 'anim@melee@switchblade@holster', 'unholster', coords.x, coords.y, coords.z, 0, 0, GetEntityHeading(playerPed), 8.0, 3.0, -1, 48, 0.1)
 						Wait(100)
 					else
@@ -286,7 +290,7 @@ local function useSlot(slot)
 					Wait(0)
 					RefillAmmoInstantly(playerPed)
 
-					if data.name == 'WEAPON_PETROLCAN' or data.name == 'WEAPON_HAZARDCAN' or data.name == 'WEAPON_FIREEXTINGUISHER' then
+					if data.hash == `WEAPON_PETROLCAN` or data.hash == `WEAPON_HAZARDCAN` or data.hash == `WEAPON_FIREEXTINGUISHER` then
 						item.metadata.ammo = item.metadata.durability
 						SetPedInfiniteAmmo(playerPed, true, data.hash)
 					end
@@ -300,7 +304,7 @@ local function useSlot(slot)
 			end)
 		elseif currentWeapon then
 			local playerPed = cache.ped
-			if item.name:sub(0, 5) == 'ammo-' then
+			if data.ammo then
 				if client.weaponWheel or currentWeapon.metadata.durability <= 0 then return end
 				local maxAmmo = GetMaxAmmoInClip(playerPed, currentWeapon.hash, true)
 				local currentAmmo = GetAmmoInPedWeapon(playerPed, currentWeapon.hash)
@@ -323,7 +327,7 @@ local function useSlot(slot)
 						end
 					end)
 				end
-			elseif item.name:sub(0, 3) == 'at_' then
+			elseif data.component then
 				local components = data.client.component
 				local componentType = data.type
 				local weaponComponents = PlayerData.inventory[currentWeapon.slot].metadata.components
@@ -356,7 +360,7 @@ local function useSlot(slot)
 			elseif data.allowArmed then
 				useItem(data)
 			end
-		else
+		elseif not data.ammo and not data.component then
 			useItem(data)
 		end
 	end
@@ -494,7 +498,7 @@ local function registerCommands()
 						while true do
 							Wait(100)
 							if not invOpen then break
-							elseif not IsPedInAnyVehicle(cache.ped, false) then
+							elseif not cache.vehicle then
 								TriggerEvent('ox_inventory:closeInventory')
 								break
 							end
@@ -757,7 +761,7 @@ RegisterNetEvent('ox_inventory:createDrop', function(drop, data, owner, slot)
 	if owner == PlayerData.source and invOpen and #(GetEntityCoords(cache.ped) - data.coords) <= 1 then
 		if currentWeapon?.slot == slot then currentWeapon = Utils.Disarm(currentWeapon) end
 
-		if not IsPedInAnyVehicle(cache.ped, false) then
+		if not cache.vehicle then
 			openInventory('drop', drop)
 		else
 			SendNUIMessage({
@@ -805,15 +809,25 @@ lib.onCache('ped', function()
 	Utils.WeaponWheel()
 end)
 
-lib.onCache('vehicle', function(vehicle)
-	if vehicle then
-		if DoesVehicleHaveWeapons(vehicle) then
-			return Utils.WeaponWheel(true)
-			-- todo: check if current seat has weapon
-		end
-	end
+lib.onCache('seat', function(seat)
+	SetTimeout(0, function()
+		if seat then
+			if DoesVehicleHaveWeapons(cache.vehicle) then
+				Utils.WeaponWheel(true)
 
-	Utils.WeaponWheel(false)
+				-- todo: all weaponised vehicle data
+				if cache.seat == -1 then
+					if GetEntityModel(cache.vehicle) == `firetruk` then
+						SetCurrentPedVehicleWeapon(cache.ped, 1422046295)
+					end
+				end
+
+				return
+			end
+		end
+
+		Utils.WeaponWheel(false)
+	end)
 end)
 
 RegisterNetEvent('ox_inventory:setPlayerInventory', function(currentDrops, inventory, weight, esxItem, player, source)
@@ -848,7 +862,7 @@ RegisterNetEvent('ox_inventory:setPlayerInventory', function(currentDrops, inven
 	local ItemData = table.create(0, #Items)
 
 	for _, v in pairs(Items) do
-		v.usable = (v.client and next(v.client) or v.consume == 0 or esxItem[v.name] or v.name:sub(0, 7) == 'WEAPON_' or v.name:sub(0, 5) == 'ammo-' or v.name:sub(0, 3) == 'at_') and true or false
+		v.usable = (v.client and next(v.client) or v.effect or v.consume == 0 or esxItem[v.name] or v.weapon or v.component or v.ammo or v.tint) and true
 
 		local buttons = {}
 		if v.buttons then
@@ -869,7 +883,7 @@ RegisterNetEvent('ox_inventory:setPlayerInventory', function(currentDrops, inven
 
 	local locales = {}
 	for k, v in pairs(shared.locale()) do
-		if k:find('ui_') then
+		if k:find('ui_') or k == '$' then
 			locales[k] = v
 		end
 	end
@@ -1034,7 +1048,7 @@ RegisterNetEvent('ox_inventory:setPlayerInventory', function(currentDrops, inven
 					if IsPedShooting(playerPed) then
 						local currentAmmo
 
-						if currentWeapon.name == 'WEAPON_PETROLCAN' or currentWeapon.name == 'WEAPON_HAZARDCAN' or currentWeapon.name == 'WEAPON_FIREEXTINGUISHER' then
+						if currentWeapon.hash == `WEAPON_PETROLCAN` or currentWeapon.hash == `WEAPON_HAZARDCAN` or currentWeapon.hash == `WEAPON_FIREEXTINGUISHER` then
 							currentAmmo = currentWeapon.metadata.ammo - 0.05
 
 							if currentAmmo <= 0 then

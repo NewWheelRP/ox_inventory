@@ -16,8 +16,6 @@ local function setPlayerInventory(player, data)
 		data = MySQL:loadPlayer(player.identifier)
 	end
 
-	player = server.setPlayerData(player)
-
 	local inventory = {}
 	local totalWeight = 0
 
@@ -39,8 +37,9 @@ local function setPlayerInventory(player, data)
 		end
 	end
 
+	player.source = tonumber(player.source)
 	local inv = Inventory.Create(player.source, player.name, 'player', shared.playerslots, totalWeight, shared.playerweight, player.identifier, inventory)
-	inv.player = player
+	inv.player = server.setPlayerData(player)
 
 	if shared.framework == 'esx' then Inventory.SyncInventory(inv) end
 	TriggerClientEvent('ox_inventory:setPlayerInventory', player.source, Inventory.Drops, inventory, totalWeight, server.UsableItemsCallbacks, inv.player, player.source)
@@ -195,30 +194,37 @@ lib.callback.register('ox_inventory:useItem', function(source, item, slot, metad
 		if item and data and data.count > 0 and data.name == item.name then
 			inventory.usingItem = slot
 			data = {name=data.name, label=data.label, count=data.count, slot=slot or data.slot, metadata=data.metadata, consume=item.consume}
-			if type == 1 then -- weapon
+
+			if item.weapon then
 				inventory.weapon = data.slot
 				return data
-			elseif type == 2 then -- ammo
+			elseif item.ammo then
 				if inventory.weapon then
 					local weapon = inventory.items[inventory.weapon]
-					if weapon?.metadata.durability > 0 then
+
+					if weapon and weapon?.metadata.durability > 0 then
 						data.consume = nil
 						return data
 					end
 				end
+
 				return false
-			elseif type == 3 then -- component
+			elseif item.component or item.tint then
 				data.consume = 1
+				data.component = true
 				return data
 			elseif server.UsableItemsCallbacks[item.name] then
 				server.UseItem(source, data.name, data)
 			else
 				if item.consume and data.count >= item.consume then
 					local result = item.cb and item.cb('usingItem', item, inventory, slot)
+
 					if result == false then return end
+
 					if result ~= nil then
 						data.server = result
 					end
+
 					return data
 				else
 					TriggerClientEvent('ox_inventory:notify', source, {type = 'error', text = shared.locale('item_not_enough', item.name), duration = 2500})
