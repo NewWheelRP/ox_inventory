@@ -25,10 +25,10 @@ return {
 	['male'] = "Male",
 	['female'] = "Female",
 	['used'] = "Used",
-	['removed'] = "Removed %sx",
-	['added'] = "Added %sx",
-	['holstered'] = "Holstered",
-	['equipped'] = "Equipped",
+	['ui_removed'] = "Removed",
+	['ui_added'] = "Added",
+	['ui_holstered'] = "Holstered",
+	['ui_equipped'] = "Equipped",
 	['using'] = "Using %s",
 	['inventory_setup'] = "Inventory is ready to use",
 	['inventory_player_access'] = "You can't open your inventory right now",
@@ -83,6 +83,6 @@ return {
 	['use_hotbar'] = "Use hotbar item %s~",
 	['no_durability'] = "%s durability is depleted",
 	['cannot_give'] = "Unable to give %s %s to the target",
-	['evidence_cannot_take'] = "Not high enough grade to take from evidence",
+	['evidence_cannot_take'] = "You are not authorised to withdraw evidence",
 	['dumpster'] = "Dumpster"
 }

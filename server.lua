@@ -6,33 +6,43 @@ local Inventory = server.inventory
 local Items = server.items
 
 ---@param player table
----@param data table
+---@param data table?
 --- player requires source, identifier, and name
 --- optionally, it should contain jobs/groups, sex, and dateofbirth
-local function setPlayerInventory(player, data)
+function server.setPlayerInventory(player, data)
 	while not shared.ready do Wait(0) end
 
 	if not data then
-		data = MySQL:loadPlayer(player.identifier)
+		data = db.loadPlayer(player.identifier)
 	end
 
 	local inventory = {}
 	local totalWeight = 0
 
-	if data then
+	if data and next(data) then
+		local ostime = os.time()
+
 		for _, v in pairs(data) do
-			if type(v) == 'number' then break end
-			local item = Items(v.name)
-
-			if item then
-				if v.metadata then
-					v.metadata = Items.CheckMetadata(v.metadata, item, v.name)
+			if type(v) == 'number' then
+				if server.convertInventory then
+					inventory, totalWeight = server.convertInventory(player.source, data)
+					break
+				else
+					return error(('Inventory for player.%s (%s) contains invalid data. Ensure you have converted inventories to the correct format.'):format(player.source, GetPlayerName(player.source)))
 				end
+			else
+				local item = Items(v.name)
 
-				local weight = Inventory.SlotWeight(item, v)
-				totalWeight = totalWeight + weight
+				if item then
+					if v.metadata then
+						v.metadata = Items.CheckMetadata(v.metadata, item, v.name, ostime)
+					end
 
-				inventory[v.slot] = {name = v.name, label = item.label, weight = weight, slot = v.slot, count = v.count, description = item.description, metadata = v.metadata, stack = item.stack, close = item.close}
+					local weight = Inventory.SlotWeight(item, v)
+					totalWeight = totalWeight + weight
+
+					inventory[v.slot] = {name = item.name, label = item.label, weight = weight, slot = v.slot, count = v.count, description = item.description, metadata = v.metadata, stack = item.stack, close = item.close}
+				end
 			end
 		end
 	end
@@ -40,21 +50,29 @@ local function setPlayerInventory(player, data)
 	player.source = tonumber(player.source)
 	local inv = Inventory.Create(player.source, player.name, 'player', shared.playerslots, totalWeight, shared.playerweight, player.identifier, inventory)
 	inv.player = server.setPlayerData(player)
+	inv.player.ped = GetPlayerPed(player.source)
 
-	if shared.framework == 'esx' then Inventory.SyncInventory(inv) end
-	TriggerClientEvent('ox_inventory:setPlayerInventory', player.source, Inventory.Drops, inventory, totalWeight, server.UsableItemsCallbacks, inv.player, player.source)
+	if server.syncInventory then server.syncInventory(inv) end
+	TriggerClientEvent('ox_inventory:setPlayerInventory', player.source, Inventory.Drops, inventory, totalWeight, inv.player, player.source)
 end
-exports('setPlayerInventory', setPlayerInventory)
-AddEventHandler('ox_inventory:setPlayerInventory', setPlayerInventory)
+exports('setPlayerInventory', server.setPlayerInventory)
+AddEventHandler('ox_inventory:setPlayerInventory', server.setPlayerInventory)
 
 local Vehicles = data 'vehicles'
 
 lib.callback.register('ox_inventory:openInventory', function(source, inv, data)
+	if Inventory.Lock then return false end
+
 	local left = Inventory(source)
 	local right = left.open and Inventory(left.open)
 
 	if right then
 		if right.open ~= source then return end
+
+		if right.player then
+			TriggerClientEvent('ox_inventory:closeInventory', right.player.source, true)
+		end
+
 		right:set('open', false)
 		left:set('open', false)
 		right = nil
@@ -68,8 +86,20 @@ lib.callback.register('ox_inventory:openInventory', function(source, inv, data)
 			if data.class and data.model then
 				right = Inventory(data.id)
 				if not right then
-					local vehicle = Vehicles[inv]['models'][data.model] or Vehicles[inv][data.class]
-					right = Inventory.Create(data.id, Inventory.GetPlateFromId(data.id), inv, vehicle[1], 0, vehicle[2], false)
+					local vehicleData = Vehicles[inv]['models'][data.model] or Vehicles[inv][data.class]
+					local plate = shared.trimplate and string.strtrim(data.id:sub(6)) or data.id:sub(6)
+
+					if Ox then
+						local vehicle = Ox.GetVehicleFromNetId(data.netid)
+
+						if vehicle then
+							right = Inventory.Create(vehicle.id or vehicle.plate, plate, inv, vehicleData[1], 0, vehicleData[2], false)
+						end
+					end
+
+					if not right then
+						right = Inventory.Create(data.id, plate, inv, vehicleData[1], 0, vehicleData[2], false)
+					end
 				end
 			elseif inv == 'drop' then
 				right = Inventory(data.id)
@@ -88,8 +118,15 @@ lib.callback.register('ox_inventory:openInventory', function(source, inv, data)
 
 		elseif inv == 'dumpster' then
 			right = Inventory(data)
+
 			if not right then
-				right = Inventory.Create(data, shared.locale('dumpster'), inv, 15, 0, 100000, false)
+				local netid = tonumber(data:sub(9))
+
+				-- dumpsters do not work with entity lockdown. need to rewrite, but having to do
+				-- distance checks to some ~7000 dumpsters and freeze the entities isn't ideal
+				if netid and NetworkGetEntityFromNetworkId(netid) > 0 then
+					right = Inventory.Create(data, shared.locale('dumpster'), inv, 15, 0, 100000, false)
+				end
 			end
 
 		elseif inv == 'container' then
@@ -124,32 +161,20 @@ lib.callback.register('ox_inventory:openInventory', function(source, inv, data)
 
 	else left.open = true end
 
-	return {id=left.id, label=left.label, type=left.type, slots=left.slots, weight=left.weight, maxWeight=left.maxWeight}, right and {id=right.id, label=right.label, type=right.type, slots=right.slots, weight=right.weight, maxWeight=right.maxWeight, items=right.items, coords=right.coords}
+	return {id=left.id, label=left.label, type=left.type, slots=left.slots, weight=left.weight, maxWeight=left.maxWeight}, right and {id=right.id, label=right.type == 'otherplayer' and '' or right.label, type=right.type, slots=right.slots, weight=right.weight, maxWeight=right.maxWeight, items=right.items, coords=right.coords, distance=right.distance}
 end)
 
 local Licenses = data 'licenses'
 
+---@todo licenses functions as part of bridge (keep the callback here)
 lib.callback.register('ox_inventory:buyLicense', function(source, id)
-	if shared.framework == 'esx' then
-		local license = Licenses[id]
-		if license then
-			local inventory = Inventory(source)
-			local result = MySQL:selectLicense(license.name, inventory.owner)
+	local license = Licenses[id]
+	if not license then return end
 
-			if result then
-				return false, 'has_weapon_license'
-			elseif Inventory.GetItem(inventory, 'money', false, true) < license.price then
-				return false, 'poor_weapon_license'
-			else
-				Inventory.RemoveItem(inventory, 'money', license.price)
-				TriggerEvent('esx_license:addLicense', source, 'weapon')
+	local inventory = Inventory(source)
+	if not inventory then return end
 
-				return true, 'bought_weapon_license'
-			end
-		end
-	else
-		shared.warning('Licenses can only be purchased when using es_extended and esx_licenses. Integrated functionality will be added soon.')
-	end
+	return server.buyLicense(inventory, license)
 end)
 
 lib.callback.register('ox_inventory:getItemCount', function(source, item, metadata, target)
@@ -171,22 +196,30 @@ lib.callback.register('ox_inventory:getInventory', function(source, id)
 	}
 end)
 
-lib.callback.register('ox_inventory:useItem', function(source, item, slot, metadata)
+---@param source number
+---@param itemName string
+---@param slot number?
+---@param metadata table?
+---@return table | boolean | nil
+lib.callback.register('ox_inventory:useItem', function(source, itemName, slot, metadata)
 	local inventory = Inventory(source)
 	if inventory.type == 'player' then
-		local item, type = Items(item)
+		local item = Items(itemName)
 		local data = item and (slot and inventory.items[slot] or Inventory.GetItem(source, item, metadata))
-		local durability = type ~= 1 and data.metadata?.durability
+
+		if not data then return end
+
+		local durability = data.metadata?.durability
 
 		if durability then
 			if durability > 100 then
 				if os.time() > durability then
 					inventory.items[slot].metadata.durability = 0
-					TriggerClientEvent('ox_inventory:notify', source, {type = 'error', text = shared.locale('no_durability', data.label), duration = 2500})
+					TriggerClientEvent('ox_lib:notify', source, { type = 'error', description = shared.locale('no_durability', data.label) })
 					return
 				end
 			elseif durability <= 0 then
-				TriggerClientEvent('ox_inventory:notify', source, {type = 'error', text = shared.locale('no_durability', data.label), duration = 2500})
+				TriggerClientEvent('ox_lib:notify', source, { type = 'error', description = shared.locale('no_durability', data.label) })
 				return
 			end
 		end
@@ -196,7 +229,7 @@ lib.callback.register('ox_inventory:useItem', function(source, item, slot, metad
 			data = {name=data.name, label=data.label, count=data.count, slot=slot or data.slot, metadata=data.metadata, consume=item.consume}
 
 			if item.weapon then
-				inventory.weapon = data.slot
+				inventory.weapon = inventory.weapon ~= data.slot and data.slot or nil
 				return data
 			elseif item.ammo then
 				if inventory.weapon then
@@ -213,10 +246,8 @@ lib.callback.register('ox_inventory:useItem', function(source, item, slot, metad
 				data.consume = 1
 				data.component = true
 				return data
-			elseif server.UsableItemsCallbacks[item.name] then
-				server.UseItem(source, data.name, data)
-			else
-				if item.consume and data.count >= item.consume then
+			elseif item.consume then
+				if data.count >= item.consume then
 					local result = item.cb and item.cb('usingItem', item, inventory, slot)
 
 					if result == false then return end
@@ -227,9 +258,35 @@ lib.callback.register('ox_inventory:useItem', function(source, item, slot, metad
 
 					return data
 				else
-					TriggerClientEvent('ox_inventory:notify', source, {type = 'error', text = shared.locale('item_not_enough', item.name), duration = 2500})
+					TriggerClientEvent('ox_lib:notify', source, { type = 'error', description = shared.locale('item_not_enough', item.name) })
 				end
+			elseif server.UseItem then
+				pcall(server.UseItem, source, data.name, data)
 			end
 		end
 	end
 end)
+
+local function conversionScript()
+	shared.ready = false
+
+	local file = 'setup/convert.lua'
+	local import = LoadResourceFile(shared.resource, file)
+	local func = load(import, ('@@%s/%s'):format(shared.resource, file)) --[[@as function]]
+
+	conversionScript = func()
+end
+
+RegisterCommand('convertinventory', function(source, args)
+	if source ~= 0 then return shared.warning('This command can only be executed with the server console.') end
+	if type(conversionScript) == 'function' then conversionScript() end
+	local arg = args[1]
+
+	local convert = arg and conversionScript[arg]
+
+	if not convert then
+		return shared.info('Invalid conversion argument. Valid options: esx, esxproperty, qb, linden')
+	end
+
+	CreateThread(convert)
+end, true)

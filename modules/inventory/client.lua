@@ -1,3 +1,5 @@
+if not lib then return end
+
 local Inventory = {}
 
 Inventory.Dumpsters = {218085040, 666561306, -58485588, -206690185, 1511880420, 682791951}
@@ -8,14 +10,14 @@ if shared.qtarget then
 
 		if not netId then
 			NetworkRegisterEntityAsNetworked(entity)
-			SetEntityAsMissionEntity(entity)
+			SetEntityAsMissionEntity(entity, false, false)
 			netId = NetworkGetNetworkIdFromEntity(entity)
 			NetworkUseHighPrecisionBlending(netId, false)
 			SetNetworkIdExistsOnAllMachines(netId, true)
 			SetNetworkIdCanMigrate(netId, true)
 		end
 
-		exports.ox_inventory:openInventory('dumpster', 'dumpster'..netId)
+		client.openInventory('dumpster', 'dumpster'..netId)
 	end
 
 	exports.qtarget:AddTargetModel(Inventory.Dumpsters, {
@@ -68,35 +70,58 @@ function Inventory.Search(search, item, metadata)
 end
 exports('Search', Inventory.Search)
 
-local function OpenEvidence()
-	exports.ox_inventory:openInventory('policeevidence')
+local function openEvidence()
+	client.openInventory('policeevidence')
+end
+
+local function nearbyEvidence(self)
+	---@diagnostic disable-next-line: param-type-mismatch
+	DrawMarker(2, self.coords.x, self.coords.y, self.coords.z, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.3, 0.2, 0.15, 30, 30, 150, 222, false, false, 0, true, false, false, false)
+
+	if self.currentDistance < 1.2 and lib.points.closest().id == self.id and IsControlJustReleased(0, 38) then
+		openEvidence()
+	end
 end
 
 Inventory.Evidence = setmetatable(data('evidence'), {
 	__call = function(self)
 		for _, evidence in pairs(self) do
-			if shared.qtarget then
-				exports.qtarget:RemoveZone(evidence.target.name)
-				exports.qtarget:AddBoxZone(evidence.target.name, evidence.target.loc, evidence.target.length or 0.5, evidence.target.width or 0.5,
-				{
-					name = evidence.target.name,
-					heading = evidence.target.heading or 0.0,
-					debugPoly = false,
-					minZ = evidence.target.minZ,
-					maxZ = evidence.target.maxZ
-				}, {
-					options = {
+			if evidence.point then
+				evidence.point:remove()
+			end
+
+			if client.hasGroup(shared.police) then
+				if shared.qtarget then
+					if evidence.target then
+						exports.qtarget:RemoveZone(evidence.target.name)
+						exports.qtarget:AddBoxZone(evidence.target.name, evidence.target.loc, evidence.target.length or 0.5, evidence.target.width or 0.5,
 						{
-							icon = 'fas fa-warehouse',
-							label = shared.locale('open_police_evidence'),
-							job = shared.police,
-							action = function()
-								OpenEvidence()
-							end
-						},
-					},
-					distance = evidence.target.distance or 3.0
-				})
+							name = evidence.target.name,
+							heading = evidence.target.heading or 0.0,
+							debugPoly = false,
+							minZ = evidence.target.minZ,
+							maxZ = evidence.target.maxZ
+						}, {
+							options = {
+								{
+									icon = 'fas fa-warehouse',
+									label = shared.locale('open_police_evidence'),
+									job = shared.police,
+									action = openEvidence
+								},
+							},
+							distance = evidence.target.distance or 2.0
+						})
+					end
+				else
+					evidence.target = nil
+					evidence.point = lib.points.new({
+						coords = evidence.coords,
+						distance = 16,
+						inv = 'policeevidence',
+						nearby = nearbyEvidence
+					})
+				end
 			end
 		end
 	end
@@ -106,33 +131,55 @@ local function OpenStash(data)
 	exports.ox_inventory:openInventory('stash', data)
 end
 
+local function nearbyStash(self)
+	---@diagnostic disable-next-line: param-type-mismatch
+	DrawMarker(2, self.coords.x, self.coords.y, self.coords.z, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.3, 0.2, 0.15, 30, 30, 150, 222, false, false, 0, true, false, false, false)
+end
+
 Inventory.Stashes = setmetatable(data('stashes'), {
 	__call = function(self)
 		for id, stash in pairs(self) do
 			if stash.jobs then stash.groups = stash.jobs end
 
-			if shared.qtarget and stash.target then
-				exports.qtarget:RemoveZone(stash.name)
-				exports.qtarget:AddBoxZone(stash.name, stash.target.loc, stash.target.length or 0.5, stash.target.width or 0.5,
-				{
-					name = stash.name,
-					heading = stash.target.heading or 0.0,
-					debugPoly = false,
-					minZ = stash.target.minZ,
-					maxZ = stash.target.maxZ
-				}, {
-					options = {
+			if stash.point then
+				stash.point:remove()
+			end
+
+			if not stash.groups or client.hasGroup(stash.groups) then
+				if shared.qtarget then
+					if stash.target then
+						exports.qtarget:RemoveZone(stash.name)
+						exports.qtarget:AddBoxZone(stash.name, stash.target.loc, stash.target.length or 0.5, stash.target.width or 0.5,
 						{
-							icon = stash.target.icon or 'fas fa-warehouse',
-							label = stash.target.label or shared.locale('open_stash'),
-							job = stash.groups,
-							action = function()
-								OpenStash({id=id})
-							end
-						},
-					},
-					distance = stash.target.distance or 3.0
-				})
+							name = stash.name,
+							heading = stash.target.heading or 0.0,
+							debugPoly = false,
+							minZ = stash.target.minZ,
+							maxZ = stash.target.maxZ
+						}, {
+							options = {
+								{
+									icon = stash.target.icon or 'fas fa-warehouse',
+									label = stash.target.label or shared.locale('open_stash'),
+									job = stash.groups,
+									action = function()
+										OpenStash({id=id})
+									end
+								},
+							},
+							distance = stash.target.distance or 3.0
+						})
+					end
+				else
+					stash.target = nil
+					stash.point = lib.points.new({
+						coords = stash.coords,
+						distance = 16,
+						inv = 'stash',
+						invId = id,
+						nearby = nearbyStash
+					})
+				end
 			end
 		end
 	end

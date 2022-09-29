@@ -110,13 +110,6 @@ return {
 	['lockpick'] = {
 		label = 'Lockpick',
 		weight = 160,
-		consume = 0,
-		client = {
-			anim = { dict = 'anim@amb@clubhouse@tutorial@bkr_tut_ig3@', clip = 'machinic_loop_mechandplayer' },
-			disable = { move = true, car = true, combat = true },
-			usetime = 5000,
-			cancel = true
-		}
 	},
 
 	['phone'] = {
@@ -126,14 +119,14 @@ return {
 		consume = 0,
 		client = {
 			add = function(total)
-				if total > 0 and GetResourceState('npwd') == 'started' then
-					exports.npwd:setPhoneDisabled(false)
+				if total > 0 then
+					pcall(function() return exports.npwd:setPhoneDisabled(false) end)
 				end
 			end,
 
 			remove = function(total)
-				if total < 1 and GetResourceState('npwd') == 'started' then
-					exports.npwd:setPhoneDisabled(true)
+				if total < 1 then
+					pcall(function() return exports.npwd:setPhoneDisabled(true) end)
 				end
 			end
 		}
@@ -172,7 +165,6 @@ return {
 		label = 'Radio',
 		weight = 1000,
 		stack = false,
-		consume = 0,
 		allowArmed = true
 	},
 
@@ -184,5 +176,10 @@ return {
 			anim = { dict = 'clothingshirt', clip = 'try_shirt_positive_d' },
             usetime = 3500
 		}
+	},
+
+	['clothing'] = {
+		label = 'Clothing',
+		consume = 0,
 	},
 }
